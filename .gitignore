@@ -17,3 +17,7 @@ venv/
 *.zip
 build/
 dist/
+
+# SBOM build output and its throwaway generation environment
+sbom.cdx.json
+.sbom-venv/

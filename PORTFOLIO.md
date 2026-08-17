@@ -22,7 +22,7 @@ This log documents each stage as it's completed: the security concept, the exact
 | 0 | Environment & Safety validation | ✅ PASS | See below |
 | 1 | CI/CD Fundamentals (repo, Lambda, pytest, GitHub Actions) | ✅ PASS | See below |
 | 2 | Secret Scanning (Gitleaks) | ✅ PASS | See below |
-| 3 | SAST & Dependencies (Bandit, Trivy) | Not Started | — |
+| 3 | SAST & Dependencies (Bandit, Trivy) | ✅ PASS | See below |
 | 4 | SBOM (CycloneDX) | Not Started | — |
 | 5 | Terraform & IaC Security (Checkov, Trivy IaC) | Not Started | — |
 | 6 | Security Gates (full PR pipeline) | Not Started | — |
@@ -35,32 +35,9 @@ This log documents each stage as it's completed: the security concept, the exact
 
 **Date:** 2026-08-17
 
-**Concept:** Before any code is written or any AWS resource touched, confirm the toolchain is installed and AWS credentials resolve to the expected identity/account. This is the earliest possible point to prevent accidental changes in the wrong environment — a foundational shift-left practice: verify context before you build, not after.
+**Concept:** Before any code is written or any AWS resource touched, confirm the toolchain is installed and AWS credentials resolve to the expected identity/account.
 
-**Commands run and evidence:**
-
-```
-$ git --version
-git version 2.50.1 (Apple Git-155)
-
-$ aws --version
-aws-cli/2.36.8 Python/3.14.6 Darwin/25.5.0 exe/x86_64
-
-$ terraform version
-Terraform v1.15.8
-
-$ python3 --version
-Python 3.13.5
-
-$ aws sts get-caller-identity
-(confirmed: valid UserId, Account, and Arn returned — AWS CLI access confirmed)
-```
-
-**Result:** PASS — full toolchain (Git, AWS CLI, Terraform, Python 3) installed and current; AWS credentials active and resolving to a known identity.
-
-**Planned AWS footprint (cost control):** 1 Lambda function (free-tier: 1M requests + 400,000 GB-seconds/month), 1 minimal-scope IAM execution role (no cost), 1 CloudWatch Log Group with short retention (1–3 days, negligible cost). No EC2/EKS/ECS, no NAT Gateway, no load balancer, no RDS, no API Gateway (Lambda invoked directly via CLI to avoid an always-on HTTP endpoint). Estimated cost: **$0**, with teardown planned at lab completion.
-
-**Skill demonstrated:** Environment validation and blast-radius planning before any infrastructure exists.
+**Result:** PASS — Git 2.50.1, AWS CLI 2.36.8, Terraform 1.15.8, Python 3.13.5, valid AWS identity confirmed. Planned AWS footprint: 1 Lambda (free tier), 1 IAM execution role, 1 CloudWatch Log Group (short retention). No EC2/EKS/ECS/NAT/LB/RDS/API Gateway. Estimated cost: $0.
 
 ---
 
@@ -68,99 +45,17 @@ $ aws sts get-caller-identity
 
 **Date:** 2026-08-17
 
-**Concept:** Establish the repo and the smallest possible testable application — a Lambda handler with business logic separated into a pure function — then prove it locally before any CI system ever sees it, and finally automate that same proof in GitHub Actions. This stage covers the core SDLC vocabulary: repo, commit, branch, PR, workflow, runner, build, test.
+**Concept:** Establish the repo and a minimal testable Lambda, prove it locally, then automate the same proof in GitHub Actions. Covers repo, commit, branch, PR, workflow, runner, build, test.
 
-### 1a. Repository initialized
+**Highlights:**
+- Repo initialized, Lambda handler + pure `build_greeting()` function + 4 pytest unit tests scaffolded, all passing locally before any CI existed.
+- Corrected Git committer identity before pushing (auto-guessed local hostname email → real identity), since this repo is public portfolio evidence.
+- Diagnosed and fixed a real GitHub authentication failure: HTTPS push rejected (password auth deprecated) → confirmed via `git remote -v` the remote was still HTTPS despite SSH keys existing → loaded existing key into agent, verified with `ssh -T git@github.com`, repointed remote to SSH, pushed successfully.
+- Built `.github/workflows/ci.yml` (Checkout → Python setup → Dependencies → Unit tests). First run: Success, 13s.
+- **Proved CI is a real gate:** deliberately broke a test → CI red X → fixed it → CI green. (Along the way, caught a `sed` edit that silently failed to apply due to shell quoting around `!` — verified with `cat` before trusting the result.)
+- Opened and merged first PR, with CI running as a PR check.
 
-```
-$ git init
-$ git status
-On branch main
-No commits yet
-```
-
-Result: PASS.
-
-### 1b. Application scaffolded
-
-```
-src/lambda_function.py         Lambda handler + pure build_greeting() function
-tests/test_lambda_function.py  4 pytest unit tests
-pytest.ini                     Test discovery config (pythonpath = src)
-requirements.txt               Runtime deps (empty — stdlib only)
-requirements-dev.txt           Dev tooling: pytest==8.3.3
-.gitignore                     Excludes __pycache__, venv, secrets, build artifacts
-README.md                      Project overview + local setup instructions
-```
-
-Design decision: `requirements.txt` (what ships to prod) is kept separate from `requirements-dev.txt` (local tooling) — matters again in Stage 3 when dependency scanning needs to target what actually deploys.
-
-### 1c. Local unit tests — proof before CI exists
-
-```
-$ pip3 install -r requirements-dev.txt --break-system-packages
-$ python3 -m pytest -v
-tests/test_lambda_function.py::test_build_greeting_with_name PASSED             [ 25%]
-tests/test_lambda_function.py::test_build_greeting_default_when_empty PASSED    [ 50%]
-tests/test_lambda_function.py::test_lambda_handler_returns_200 PASSED           [ 75%]
-tests/test_lambda_function.py::test_lambda_handler_defaults_when_no_name PASSED [100%]
-```
-
-Result: PASS — 4/4 unit tests passed locally, before automating the same check.
-
-### 1d. First commit + Git identity correction
-
-```
-$ git add .
-$ git commit -m "Add minimal Lambda handler with pytest unit tests"
-[main (root-commit) 31ad9a4] Add minimal Lambda handler with pytest unit tests
-```
-
-Git auto-inferred committer identity (`rgrullon@wonderland.local`). Corrected before this became public portfolio history:
-
-```
-$ git config --global user.name "Robinson Grullon"
-$ git config --global user.email "<github-associated email>"
-$ git commit --amend --reset-author --no-edit
-```
-
-Result: PASS.
-
-### 1e. Feature branch + GitHub remote (with real-world SSH troubleshooting)
-
-```
-$ git checkout -b feature/ci-workflow
-```
-
-Created GitHub remote `duncan08/cicd-security-lab` (empty — no auto-generated README/.gitignore/license, to avoid diverging histories with the local repo).
-
-Hit and resolved a realistic auth issue: HTTPS push was rejected (`Password authentication is not supported for Git operations`). Diagnosed that the remote was still HTTPS despite having SSH keys — `git remote -v` confirmed it. Fixed by loading an existing key (`terraform-learning-key`) into the SSH agent, verifying with `ssh -T git@github.com` → `Hi duncan08! You've successfully authenticated`, then repointing the remote:
-
-```
-$ git remote set-url origin git@github.com:duncan08/cicd-security-lab.git
-$ git push -u origin main
-$ git push -u origin feature/ci-workflow
-```
-
-Result: PASS — both branches live on GitHub over SSH.
-
-**Skill demonstrated:** Diagnosing and fixing real Git authentication failures (HTTPS-vs-SSH remote misconfiguration), not just following a script.
-
-### 1f. GitHub Actions CI workflow
-
-`.github/workflows/ci.yml` — Checkout → Python setup → Install dependencies → Run unit tests, triggered on push to `main`/`feature/**` and on PRs to `main`.
-
-First automated run: **Status Success, 13s total duration.**
-
-### 1g. Proving CI is a real gate, not decoration
-
-Deliberately broke `test_build_greeting_with_name`, committed, pushed — **CI FAILED**, red X on the "Run unit tests" step. (Caught and corrected a false-pass along the way: an initial `sed` edit silently failed to apply due to shell quoting around the `!` character — verified via `cat` before trusting the result.) Restored the correct assertion, committed, pushed — **CI PASSED** again.
-
-### 1h. Pull Request → Protected merge to main
-
-Opened a PR (`feature/ci-workflow` → `main`). CI ran again automatically as a PR check. Merged once green.
-
-**Skill demonstrated:** Full local-to-CI feedback loop — branch, automate, break, catch, fix, verify, review, merge.
+**Result:** PASS.
 
 ---
 
@@ -168,75 +63,43 @@ Opened a PR (`feature/ci-workflow` → `main`). CI ran again automatically as a 
 
 **Date:** 2026-08-17
 
-**Concept:** A hardcoded credential committed to Git is one of the most common, costly security incidents — Git history is permanent, and once pushed, a secret must be treated as compromised regardless of whether it's later deleted. Gitleaks can run at three points in the SDLC: **pre-commit** (local, earliest/cheapest), **CI** (the mandatory safety net), and **full-history scan** (catches what predates scanning, or slipped through). This stage proved all three — including an unplanned but highly instructive detour into *why* pre-commit beats after-the-fact cleanup.
+**Concept:** A committed secret must be treated as compromised the moment it's pushed, regardless of later deletion. Gitleaks was implemented at three layers: pre-commit (local), CI (mandatory), and full-history awareness.
 
-### 2a. Install + baseline
+**Highlights:**
+- Installed Gitleaks 8.30.1; established a clean baseline scan.
+- Hit and systematically debugged a scanner false-negative: a synthetic AWS Access Key pattern wasn't detected even on a raw filesystem scan. Ruled out staging and `.gitignore` issues before concluding it was a ruleset/version quirk, and pivoted to a private-key PEM header pattern — simpler, unambiguous, reliably detected.
+- Installed a local `.git/hooks/pre-commit` hook — proved it **blocks a commit outright**, so the secret never enters history at all. Noted the key limitation: hooks are local-only and don't travel with the repo, which is the direct justification for a CI-level gate.
+- Added a `secret-scan` CI job (full-history Gitleaks scan). Proved it catches a secret pushed via `git commit --no-verify` (simulating a contributor without the hook).
+- **Unplanned but core lesson:** deleting the secret file and committing that deletion did **not** clear CI — because `gitleaks detect` scans full commit history, and the secret was still present in an earlier commit. This directly proved why pre-commit prevention beats after-the-fact cleanup. Performed the *correct* remediation: identified the last clean commit and used `git reset --hard` + `git push --force` to actually remove the secret-containing commits from history, not just their content.
 
-```
-$ brew install gitleaks
-$ gitleaks version
-8.30.1
+**Result:** PASS.
 
-$ gitleaks detect --source . -v
-4 commits scanned.
-no leaks found
-```
+---
 
-Result: PASS — clean baseline established before introducing anything synthetic.
+## Stage 3 — SAST & Dependencies (Bandit + Trivy)
 
-### 2b. Pre-commit layer — detection, with a real debugging detour
+**Date:** 2026-08-17
 
-First attempt used a synthetic AWS Access Key pattern (`AKIA1234567890ABCDEF`) — unexpectedly returned `no leaks found` even on a direct filesystem scan bypassing Git entirely. Diagnosed systematically (confirmed the file was genuinely staged via `git diff --staged`, ruled out `.gitignore`, ruled out a stray custom config) before concluding the installed Gitleaks ruleset wasn't matching that specific pattern as expected — a real lesson that scanner rule coverage varies by version and should never be assumed.
+**Concept:** Two more categories of risk beyond secrets: **SAST** (insecure patterns in your own code — Bandit) and **SCA/dependency scanning** (known CVEs in third-party packages — Trivy). Both are mandatory CI gates that must return non-zero status on findings, same enforcement model as Stages 1–2.
 
-Pivoted to a private-key PEM header (`-----BEGIN RSA PRIVATE KEY-----`) — one of the simplest, least ambiguous secret patterns (pure regex match, no entropy/keyword dependency):
+### 3a. Bandit (SAST)
 
-```
-$ gitleaks protect --staged -v
-```
+- Installed Bandit 1.8.3; baseline scan of `src/` — clean (`No issues identified`).
+- Created an isolated negative-test fixture, `negative-tests/bandit/insecure_examples.py` — 4 classic vulnerability patterns (hardcoded password, `eval()` on untrusted input, MD5 for security use, `subprocess` shell injection via `shell=True`). Clearly commented as a test-only fixture; never imported by `src/`, never deployed.
+- Confirmed locally that Bandit flags all 4 issues (`bandit -r negative-tests/`) before wiring into CI.
+- Added a `sast` CI job scanning **`src/` only** — the actual deployable code, mirroring the `requirements.txt` vs `requirements-dev.txt` split from Stage 1. All 4 CI jobs green on clean code.
+- **Proved the gate is real:** temporarily widened the CI scan path to include `negative-tests/` → CI failed with all 4 findings, non-zero exit. Reverted the scan path to `src/` only → CI passed again.
 
-Result: PASS — leak detected (`RuleID: private-key`).
+### 3b. Trivy (Dependency / SCA scan)
 
-### 2c. Pre-commit hook — automated local enforcement
+- Installed Trivy 0.74.0; baseline scan (`trivy fs --scanners vuln --severity HIGH,CRITICAL .`) — clean, since `requirements.txt` ships no runtime dependencies.
+- Added a `dependency-scan` CI job using the official `aquasecurity/trivy-action`, filtering to `HIGH,CRITICAL` severity as the mandatory threshold. All 4 CI jobs green on clean code.
+- **Proved the gate is real:** temporarily pinned a genuinely outdated, CVE-known package (`PyYAML==5.1`, critical arbitrary-code-execution CVE) into `requirements.txt` → CI failed with the CVE listed. Removed the pin, reverted to the clean `requirements.txt` → CI passed again.
 
-Installed a native Git hook (`.git/hooks/pre-commit`) running `gitleaks protect --staged` automatically before every commit:
+### 3c. Final state
 
-```
-$ git commit -m "TEST: this commit should be blocked by the pre-commit hook"
-```
+All four CI jobs (`Unit Tests`, `Secret Scan`, `SAST`, `Dependency Scan`) pass on `main` after merge, satisfying Stage 3's requirement: Unit Tests PASS, SAST PASS, Dependency Scan PASS, with every mandatory finding proven capable of returning non-zero CI status.
 
-Result: PASS — commit refused automatically; the secret never entered Git history at all. Cleaned up (`git reset` + `rm`) and confirmed `git status` returned to clean — proving zero trace was left, because it was never committed.
-
-**Key limitation surfaced:** `.git/hooks/` is local-only and not tracked by Git — it does not travel with the repo to other contributors. This is the direct justification for the next layer.
-
-### 2d. CI layer — the safety net that can't be skipped
-
-Added a second job, `secret-scan`, to `.github/workflows/ci.yml`, installing Gitleaks in the runner and running `gitleaks detect --source . -v` (`fetch-depth: 0` to scan full history, not just the latest commit). Verified clean baseline first — both `Unit Tests` and `Secret Scan (Gitleaks)` green on unmodified code.
-
-Reintroduced the synthetic private-key secret, this time deliberately bypassing the local hook with `git commit --no-verify` — simulating a contributor without the hook installed:
-
-- **Result: CI FAILED** — `Secret Scan (Gitleaks)` red X, `Unit Tests` unaffected (independent job pass/fail). Proof the mandatory gate works even when the first layer is skipped.
-
-### 2e. The unplanned lesson — why earlier detection is stronger
-
-Attempted the "obvious" fix: delete the secret file, commit, push. **CI failed again**, even though the file was gone from the working tree. Root cause: `gitleaks detect` scans full commit **history**, not just the latest snapshot — the secret was still present in the earlier commit that introduced it. This is the exact real-world failure mode `full-history detection` exists to catch, and it directly demonstrates the stage's core lesson:
-
-- **Pre-commit** — secret never becomes a commit. Nothing to clean up, ever.
-- **CI on push** — catches it before merge, but by then it's already a commit and already sent to GitHub's servers.
-- **Delete-and-recommit is cosmetic, not remediation** — the exposure already happened; the data is still retrievable from history.
-
-**Correct remediation performed:** identified the last clean commit (`git log --oneline`), then rewrote the branch's history to remove the secret-introducing and secret-deleting commits entirely:
-
-```
-$ git reset --hard 331c2c0
-$ git push --force
-```
-
-Result: PASS — with the secret commit gone from history (not just the file), both CI jobs passed cleanly. (In a real incident, the credential itself would also need to be rotated immediately, regardless of history cleanup, since a pushed secret must be assumed compromised the moment it left the local machine — synthetic here, so no rotation needed.)
-
-### 2f. Pull Request → merge
-
-Opened and merged the PR (`feature/gitleaks-ci` → `main`) with both checks green and a history clean of the synthetic secret.
-
-**Skill demonstrated:** Full defense-in-depth secret-scanning implementation (pre-commit hook + CI gate + history awareness), systematic debugging of an unexpected scanner false-negative, and — critically — hands-on proof of *why* shift-left detection beats after-the-fact cleanup, including the correct incident-response pattern (rotate + rewrite history) rather than the naive one (delete + recommit).
+**Skill demonstrated:** End-to-end SAST and SCA gate implementation with real proof of enforcement (not just tool installation) — including using a genuine outdated dependency (not synthetic code) to validate the SCA gate against a real-world CVE.
 
 ---
