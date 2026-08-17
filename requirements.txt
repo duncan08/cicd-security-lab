@@ -3,3 +3,4 @@
 # Keeping this separate from requirements-dev.txt matters for later stages:
 # Trivy's dependency/SCA scan in Stage 3 should scan what actually ships
 # to production, not our local test tooling.
+PyYAML==5.1
