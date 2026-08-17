@@ -8,7 +8,7 @@ import json
 
 
 def test_build_greeting_with_name():
-    assert build_greeting("Rafael") == "Wrong text"
+    assert build_greeting("Rafael") == "Hello, Rafael!"
 
 
 def test_build_greeting_default_when_empty():
