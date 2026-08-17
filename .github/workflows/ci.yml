@@ -60,3 +60,18 @@ jobs:
 
       - name: Run Bandit on production source only
         run: bandit -r src/
+
+  dependency-scan:
+    name: Dependency Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
