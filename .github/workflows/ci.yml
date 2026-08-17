@@ -59,4 +59,4 @@ jobs:
         run: pip install bandit
 
       - name: Run Bandit on production source only
-        run: bandit -r src/
+        run: bandit -r src/ negative-tests/
