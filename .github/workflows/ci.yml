@@ -150,7 +150,7 @@ jobs:
         run: pip install checkov
 
       - name: Run Checkov on deployable Terraform only
-        run: checkov --directory terraform/ negative-tests/terraform/ --compact
+        run: checkov --directory terraform/ --compact
 
       - name: Run Trivy config scan on deployable Terraform only
         uses: aquasecurity/trivy-action@master
