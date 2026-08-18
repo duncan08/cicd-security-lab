@@ -67,6 +67,8 @@ resource "aws_iam_role_policy" "lambda_xray" {
 
 # Log group created explicitly (not auto-created by Lambda) so we control
 # retention and naming — short retention keeps cost near zero.
+# trivy:ignore:AWS-0017 Customer-managed KMS intentionally omitted for lab
+# cost control — same justification as the CKV_AWS_158 skip below.
 resource "aws_cloudwatch_log_group" "lambda_logs" {
   name              = "/aws/lambda/${var.function_name}"
   retention_in_days = var.log_retention_days
