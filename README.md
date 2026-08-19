@@ -27,4 +27,3 @@ python3 -m pytest -v
 
 Mac · AWS Lambda · GitHub Actions · Python · Terraform · pytest ·
 Gitleaks · Bandit · Trivy · Checkov
-# verification test
