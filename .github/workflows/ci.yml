@@ -185,3 +185,26 @@ jobs:
 
       - name: Terraform plan
         run: terraform -chdir=terraform plan -no-color
+
+  oidc-debug:
+    name: OIDC Debug (temporary — will be removed once fixed)
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Print decoded ID token claims (not the token itself)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken('sts.amazonaws.com');
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
+            console.log('aud:', payload.aud);
+            console.log('sub:', payload.sub);
+            console.log('iss:', payload.iss);
+      - name: Print role ARN GitHub is about to use (secret, but let's see its shape)
+        run: |
+          echo "Role ARN length: ${#AWS_ROLE_ARN}"
+          echo "Role ARN ends with: ...${AWS_ROLE_ARN: -30}"
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
