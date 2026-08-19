@@ -5,7 +5,7 @@ output "lambda_function_name" {
 
 output "lambda_function_arn" {
   description = "ARN of the deployed Lambda function"
-  value       = aws_lambda_function.app.nonexistent_attribute
+  value       = aws_lambda_function.app.arn
 }
 
 output "log_group_name" {
