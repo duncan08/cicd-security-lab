@@ -24,7 +24,7 @@ This log documents each stage as it's completed: the security concept, the exact
 | 2 | Secret Scanning (Gitleaks) | ✅ PASS | See below |
 | 3 | SAST & Dependencies (Bandit, Trivy) | ✅ PASS | See below |
 | 4 | SBOM (CycloneDX) | ✅ PASS | See below |
-| 5 | Terraform & IaC Security (Checkov, Trivy IaC) | Not Started | — |
+| 5 | Terraform & IaC Security (Checkov, Trivy IaC) | ✅ PASS | See below |
 | 6 | Security Gates (full PR pipeline) | Not Started | — |
 | 7 | Protected Main branch | Not Started | — |
 | 8+ | DEV deploy → Smoke Test → PROD approval → Verification/Rollback | Not Started | — |
@@ -35,9 +35,7 @@ This log documents each stage as it's completed: the security concept, the exact
 
 **Date:** 2026-08-17
 
-**Concept:** Before any code is written or any AWS resource touched, confirm the toolchain is installed and AWS credentials resolve to the expected identity/account.
-
-**Result:** PASS — Git 2.50.1, AWS CLI 2.36.8, Terraform 1.15.8, Python 3.13.5, valid AWS identity confirmed. Planned AWS footprint: 1 Lambda (free tier), 1 IAM execution role, 1 CloudWatch Log Group (short retention). No EC2/EKS/ECS/NAT/LB/RDS/API Gateway. Estimated cost: $0.
+Toolchain (Git 2.50.1, AWS CLI 2.36.8, Terraform 1.15.8, Python 3.13.5) and AWS identity validated before any code or infrastructure existed. Planned AWS footprint: 1 Lambda (free tier), 1 IAM role, 1 short-retention CloudWatch Log Group. No EC2/EKS/ECS/NAT/LB/RDS/API Gateway. Estimated cost: $0. **Result: PASS.**
 
 ---
 
@@ -45,17 +43,7 @@ This log documents each stage as it's completed: the security concept, the exact
 
 **Date:** 2026-08-17
 
-**Concept:** Establish the repo and a minimal testable Lambda, prove it locally, then automate the same proof in GitHub Actions. Covers repo, commit, branch, PR, workflow, runner, build, test.
-
-**Highlights:**
-- Repo initialized, Lambda handler + pure `build_greeting()` function + 4 pytest unit tests scaffolded, all passing locally before any CI existed.
-- Corrected Git committer identity before pushing (auto-guessed local hostname email → real identity), since this repo is public portfolio evidence.
-- Diagnosed and fixed a real GitHub authentication failure: HTTPS push rejected (password auth deprecated) → confirmed via `git remote -v` the remote was still HTTPS despite SSH keys existing → loaded existing key into agent, verified with `ssh -T git@github.com`, repointed remote to SSH, pushed successfully.
-- Built `.github/workflows/ci.yml` (Checkout → Python setup → Dependencies → Unit tests). First run: Success, 13s.
-- **Proved CI is a real gate:** deliberately broke a test → CI red X → fixed it → CI green. (Along the way, caught a `sed` edit that silently failed to apply due to shell quoting around `!` — verified with `cat` before trusting the result.)
-- Opened and merged first PR, with CI running as a PR check.
-
-**Result:** PASS.
+Repo, minimal Lambda + pytest suite, GitHub remote (with a real SSH-vs-HTTPS auth troubleshooting detour), and a GitHub Actions CI workflow (Checkout → Python setup → Dependencies → Unit tests). Proved CI is a real gate: broke a test → CI failed → fixed it → CI passed. Opened and merged first PR. **Result: PASS.**
 
 ---
 
@@ -63,16 +51,7 @@ This log documents each stage as it's completed: the security concept, the exact
 
 **Date:** 2026-08-17
 
-**Concept:** A committed secret must be treated as compromised the moment it's pushed, regardless of later deletion. Gitleaks was implemented at three layers: pre-commit (local), CI (mandatory), and full-history awareness.
-
-**Highlights:**
-- Installed Gitleaks 8.30.1; established a clean baseline scan.
-- Hit and systematically debugged a scanner false-negative: a synthetic AWS Access Key pattern wasn't detected even on a raw filesystem scan. Ruled out staging and `.gitignore` issues before concluding it was a ruleset/version quirk, and pivoted to a private-key PEM header pattern — simpler, unambiguous, reliably detected.
-- Installed a local `.git/hooks/pre-commit` hook — proved it **blocks a commit outright**, so the secret never enters history at all. Noted the key limitation: hooks are local-only and don't travel with the repo, which is the direct justification for a CI-level gate.
-- Added a `secret-scan` CI job (full-history Gitleaks scan). Proved it catches a secret pushed via `git commit --no-verify` (simulating a contributor without the hook).
-- **Unplanned but core lesson:** deleting the secret file and committing that deletion did **not** clear CI — because `gitleaks detect` scans full commit history, and the secret was still present in an earlier commit. This directly proved why pre-commit prevention beats after-the-fact cleanup. Performed the *correct* remediation: identified the last clean commit and used `git reset --hard` + `git push --force` to actually remove the secret-containing commits from history, not just their content.
-
-**Result:** PASS.
+Three-layer secret scanning: local pre-commit hook (blocks a commit outright — secret never enters history), CI gate (catches secrets pushed via `--no-verify` bypass), and a hands-on lesson in full-history exposure — deleting a secret in a follow-up commit did **not** clear the CI scan, because `gitleaks detect` scans full history. Performed the correct remediation: `git reset --hard` + `git push --force` to actually remove the secret-containing commits, not just their content. **Result: PASS.**
 
 ---
 
@@ -80,16 +59,7 @@ This log documents each stage as it's completed: the security concept, the exact
 
 **Date:** 2026-08-17
 
-**Concept:** Two more categories of risk beyond secrets: **SAST** (insecure patterns in your own code — Bandit) and **SCA/dependency scanning** (known CVEs in third-party packages — Trivy). Both are mandatory CI gates that must return non-zero status on findings.
-
-### 3a. Bandit (SAST)
-- Baseline scan of `src/` clean. Created isolated negative-test fixture `negative-tests/bandit/insecure_examples.py` (hardcoded password, `eval()`, MD5, shell injection) — never imported by `src/`, never deployed.
-- Added `sast` CI job scanning `src/` only. **Proved the gate is real:** temporarily widened scan to include `negative-tests/` → CI failed on all 4 findings → reverted → CI passed.
-
-### 3b. Trivy (Dependency / SCA scan)
-- Baseline scan clean (empty runtime `requirements.txt`). Added `dependency-scan` CI job (`aquasecurity/trivy-action`, HIGH/CRITICAL threshold). **Proved the gate is real:** temporarily pinned a genuinely outdated, CVE-known package (`PyYAML==5.1`) → CI failed with the CVE listed → reverted → CI passed.
-
-**Result:** PASS — all four CI jobs (Unit Tests, Secret Scan, SAST, Dependency Scan) green on `main`.
+Bandit (SAST) scans `src/` only, proven to fail on 4 planted vulnerability patterns in an isolated `negative-tests/bandit/` fixture and pass when clean. Trivy (SCA) dependency gate proven against a real CVE — temporarily pinned `PyYAML==5.1`, watched CI fail, reverted, watched it pass. **Result: PASS** — 4 mandatory CI gates on `main`.
 
 ---
 
@@ -97,30 +67,46 @@ This log documents each stage as it's completed: the security concept, the exact
 
 **Date:** 2026-08-18
 
-**Concept:** A Software Bill of Materials is a complete inventory of every component in the software — not just what's directly chosen (`requirements.txt`), but every **transitive dependency** pulled in behind the scenes. Its value is **supply-chain visibility and vulnerability correlation**: when a new CVE is disclosed, an existing SBOM turns "are we affected?" into a lookup instead of a re-scan from scratch. Generated during the CI build and retained as a build artifact — a permanent record of what shipped in that exact version.
+Generated a CycloneDX SBOM in a clean throwaway venv, validated it (JSON structure, `bomFormat`, component count), and demonstrated real transitive dependencies (`PyYAML`, `stevedore`, `rich`, `pluggy` — none installed directly). Wired into CI as a job that generates and uploads `sbom.cdx.json` via `actions/upload-artifact` (14-day retention); downloaded and confirmed the artifact was valid and retained. **Result: PASS** — 5 mandatory CI gates on `main`.
 
-### 4a. Local generation and validation
+---
 
-Used CycloneDX (`cyclonedx-bom`) inside a clean, throwaway virtual environment (`.sbom-venv`) with `requirements-dev.txt` installed, to get a reproducible, illustrative component set:
+## Stage 5 — Terraform & IaC Security (Checkov + Trivy IaC)
 
-```
-$ python3 -m venv .sbom-venv && source .sbom-venv/bin/activate
-$ pip install -r requirements-dev.txt cyclonedx-bom
-$ cyclonedx-py environment -o sbom.cdx.json
-```
+**Date:** 2026-08-18
 
-Validated three ways before trusting it: well-formed JSON, `bomFormat: "CycloneDX"` present, and a component count well above the 2 packages explicitly listed in `requirements-dev.txt`.
+**Concept:** Infrastructure as Code (Terraform) makes infrastructure changes reviewable in a PR like application code. Policy-as-code (Checkov, Trivy's IaC scanner) encodes security rules — encryption, least privilege, public exposure — as automated CI checks instead of manual review.
 
-**Transitive dependency proof, using real output:** the generated SBOM listed `pytest` and `bandit` (what was explicitly installed) alongside `pluggy`, `iniconfig`, `PyYAML`, `stevedore`, `rich`, `click`, `pbr` — dependencies never installed directly, pulled in automatically by `pytest`/`bandit` themselves, and now fully visible in the inventory.
+### 5a. Secure-by-default Terraform for the Lambda
 
-Result: PASS.
+Wrote `terraform/` (provider, variables, IAM role, Lambda, log group, outputs) — least-privilege IAM (logging permissions scoped to this function's specific log group ARN, never `"*"`), an explicitly created log group with short (3-day) retention, no public exposure, and `reserved_concurrent_executions` as a free cost/blast-radius cap (distinct from *provisioned* concurrency, which this project avoids). `terraform fmt -check` and `terraform validate` both clean — no AWS resources touched.
 
-### 4b. CI artifact
+### 5b. Real Checkov findings, triaged with judgment, not blanket compliance
 
-Excluded the SBOM and its generation venv from version control (`sbom.cdx.json`, `.sbom-venv/` added to `.gitignore`) — an SBOM is a build *output*, regenerated fresh every run, not tracked source. Added an `sbom` job to `.github/workflows/ci.yml` that installs dependencies, generates `sbom.cdx.json` in the runner, and uploads it via `actions/upload-artifact` with `retention-days: 14` (bounded retention, consistent with this project's low-cost/short-retention principle).
+Initial scan surfaced 5 findings. Rather than reflexively "fixing" all of them, each was individually reasoned through:
 
-Result: PASS — all 5 CI jobs green; an **Artifacts** section appeared on the workflow run with a downloadable `sbom` artifact. Downloaded and confirmed it was a valid, non-empty CycloneDX document — proof the artifact is genuinely retained and usable, not just listed.
+| Finding | Decision | Why |
+|---|---|---|
+| No X-Ray tracing | **Fixed** | Free tier, cheap, genuine observability value — added `tracing_config { mode = "Active" }` + scoped IAM permissions |
+| Log retention < 1 year | **Documented skip** | Directly conflicts with this project's own short-retention, low-cost design goal |
+| No VPC | **Documented skip** | A VPC would require a NAT Gateway for outbound access — exactly what this project's instructions say to avoid; nothing here needs VPC-only resources |
+| No Dead Letter Queue | **Documented skip** | DLQs matter for async invocations; this Lambda is only ever invoked synchronously in this lab |
+| No code signing | **Documented skip** | Real production value in a multi-team pipeline; disproportionate overhead for a single-developer lab |
 
-**Skill demonstrated:** Full SBOM lifecycle — generation, validation, and CI-artifact retention — plus a concrete, evidence-based explanation of transitive dependencies and their role in supply-chain risk, using this project's own real dependency tree rather than a textbook example.
+Each decision was written directly into the Terraform as a `checkov:skip=<ID>:<reason>` comment — a documented, auditable exception, not a silently ignored finding. Re-scan: clean, with only the intentional skips showing.
+
+### 5c. Cross-checked with a second scanner (Trivy), including real ignore-syntax debugging
+
+`trivy config .` flagged the same KMS-encryption trade-off under its own rule ID (`AVD-AWS-0017`). Applying the same documented-exception approach took two attempts: Trivy's inline-ignore comment requires no space after `#`, the full `AVD-`-prefixed rule ID (not the short form printed in output), and must sit on the line immediately before the resource block — none of which matched the first attempt (`# trivy:ignore:AWS-0017`, inside the block). Diagnosed via the actual scanner output rather than guessing twice, corrected to `#trivy:ignore:AVD-AWS-0017` directly above the resource, verified locally before pushing again.
+
+### 5d. Proving detection — isolated negative-test fixture
+
+Created `negative-tests/terraform/insecure_examples.tf` — a public-read S3 bucket, a wildcard (`Action: *`, `Resource: *`) IAM policy, and a security group open to `0.0.0.0/0` on all ports. Standalone, never referenced by `terraform/`, never applied. Both Checkov and Trivy independently flagged multiple violations against it (Test A: `insecure IaC → violation detected → FAIL`), while the deployable `terraform/` stayed clean (Test B: `deployable IaC → validation PASS → security PASS`).
+
+### 5e. CI gates — proven real, not decorative
+
+Added three CI jobs: `terraform-fmt`, `terraform-validate` (both credential-free — `init -backend=false`), and `iac-scan` (Checkov + Trivy config, scoped to `terraform/` only). All 8 jobs (unit tests, secret scan, SAST, dependency scan, SBOM, fmt, validate, IaC scan) green on clean code. Then, same fail → fix → pass pattern as every prior gate: temporarily widened the IaC scan to include `negative-tests/terraform/` → CI failed on the planted findings → reverted → CI passed again. Merged via PR with all 8 checks green.
+
+**Skill demonstrated:** Dual-scanner IaC security implementation with genuine engineering judgment — not every finding was "fixed" by adding resources; several were deliberately and transparently accepted as trade-offs against this project's own explicit cost/complexity constraints, documented in-line for anyone auditing the code later. Also: real debugging of scanner-specific ignore-comment syntax using actual tool output rather than assumption.
 
 ---
