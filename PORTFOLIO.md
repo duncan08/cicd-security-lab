@@ -26,7 +26,7 @@ This log documents each stage as it's completed: the security concept, the exact
 | 4 | SBOM (CycloneDX) | ✅ PASS | See below |
 | 5 | Terraform & IaC Security (Checkov, Trivy IaC) | ✅ PASS | See below |
 | 6 | Security Gates (full 9-job PR pipeline) | ✅ PASS | See below |
-| 7 | Protected Main branch | Not Started | — |
+| 7 | Protected Main branch | ✅ PASS | See below |
 | 8+ | DEV deploy → Smoke Test → PROD approval → Verification/Rollback | Not Started | — |
 
 ---
@@ -109,5 +109,41 @@ That revealed the root cause: GitHub's `sub` claim was `repo:duncan08@7233330/ci
 Per Stage 6's requirement, deliberately broke a control and proved deployment stops: referenced a non-existent Terraform attribute (`aws_lambda_function.app.nonexistent_attribute`). This is a schema-level error, not a policy finding — resolved by the AWS provider plugin's schema (not Terraform core, which has no built-in knowledge of AWS resource shapes), caught statically with no AWS API call required. Both `Terraform Validate` and `Terraform Plan` independently failed with the identical error — genuine defense-in-depth, the same mistake caught by two separate gates. Reverted the reference; both passed again. Merged via PR with all 9 checks green.
 
 **Skill demonstrated:** Secure, credential-less CI-to-cloud authentication (OIDC federation) built from first principles; privilege separation by design (read-only plan role, distinct from a future apply role); rigorous, evidence-based debugging of a genuine, undocumented-in-most-tutorials GitHub security behavior — verifying each layer independently before escalating to token-claim inspection, rather than guessing; and a clear technical explanation of *where* Terraform's schema validation actually lives (the provider plugin, not Terraform core).
+
+---
+
+## Stage 7 — Protected `main` Branch
+
+**Date:** 2026-08-19
+
+**Concept:** A CI pipeline with nine mandatory gates is meaningless if a merge (or a direct push) can still land on `main` without going through it. Stage 7 closes that loop: `main` itself must refuse any change that hasn't gone through a pull request, passed every required status check, and received a human approval.
+
+### 7a. Branch protection configured — and a false pass
+
+Configured a classic branch protection rule on `main` (Settings → Branches) requiring: a pull request before merging, 1 approving review, all 9 CI jobs passing as required status checks, and branches up to date before merging. First verification attempt — a direct `git push` straight to `main` — was expected to be rejected outright. It wasn't:
+
+```
+remote: Bypassed rule violations for refs/heads/main:
+remote: - Changes must be made through a pull request.
+   15d10dd..3658c50  main -> main
+```
+
+The push succeeded despite violating the rule. Root cause: classic GitHub branch protection rules exempt repository administrators by default unless **"Do not allow bypassing the above settings"** is explicitly checked — as repo owner, every rule on `main` was silently non-binding for the one account most likely to use it. A control that exists but doesn't enforce is a bigger risk than no control at all, because it reads as coverage on a checklist while doing nothing.
+
+### 7b. Fix and re-verification
+
+Checked "Do not allow bypassing the above settings, including for admins" on the rule and re-ran the identical direct-push test:
+
+```
+! [remote rejected] main -> main (protected branch hook declined)
+```
+
+A genuine, unconditional rejection — no partial success, no bypass notice. Confirmed the fix by outcome, not by assumption.
+
+### 7c. A second real finding: self-approval is disallowed
+
+One test commit (`3658c50`) had landed on `main` during the bypass window before the fix and needed removing. Rather than force-pushing a correction — which would sidestep the very control being demonstrated — it was reverted through the actual protected workflow: PR #5, `fix/revert-branch-protection-test` → `main`. This surfaced a second, independent GitHub behavior: an author cannot approve their own pull request. With only one account on the repo, the 1-required-approval rule made this PR — and every future solo-authored PR — permanently unmergeable. Resolved by adding a second GitHub account as a collaborator with review rights; that account submitted a real approval, the merge button unlocked once all 9 checks were green, and the PR merged cleanly (`b6dd165`, reverting via `747beb4`), restoring `main` to its pre-test state.
+
+**Skill demonstrated:** Distinguishing a control that *exists* from a control that *enforces* — the admin-bypass default would have let an apparently well-configured rule pass silent review while doing nothing; fix-then-reverify discipline rather than trusting a first, ambiguous result; and recognizing a genuine governance implication of GitHub's self-review restriction for solo-maintainer repositories, resolved by provisioning a real second reviewer rather than weakening the control to make it pass.
 
 ---
