@@ -48,13 +48,18 @@
       "Action": [
         "logs:CreateLogGroup",
         "logs:DeleteLogGroup",
-        "logs:DescribeLogGroups",
         "logs:PutRetentionPolicy",
         "logs:ListTagsForResource",
         "logs:TagResource",
         "logs:UntagResource"
       ],
       "Resource": "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/cicd-security-lab-fn-dev:*"
+    },
+    {
+      "Sid": "LogGroupDescribeDev",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*"
     },
     {
       "Sid": "TerraformStateReadWriteDev",
