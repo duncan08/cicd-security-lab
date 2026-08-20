@@ -25,3 +25,4 @@ sbom.cdx.json
 # Local scratch files with real account-specific values substituted in
 # (e.g. IAM policies with the actual state bucket name) — never commit
 *.local.json
+*.bak
