@@ -180,8 +180,15 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
+      # Plans against the real dev state as a representative preview that
+      # the config is deployable — this is a read-only credential (see
+      # iam-bootstrap/gha-plan-permissions.json), so it cannot mutate
+      # anything even though it now reads real remote state.
       - name: Terraform init
-        run: terraform -chdir=terraform init -backend=false
+        run: |
+          terraform -chdir=terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=dev/terraform.tfstate"
 
       - name: Terraform plan
-        run: terraform -chdir=terraform plan -no-color
+        run: terraform -chdir=terraform plan -no-color -var="environment=dev"

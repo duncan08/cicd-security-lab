@@ -7,7 +7,7 @@ data "archive_file" "lambda_zip" {
 
 # Least-privilege execution role — trusts only the Lambda service.
 resource "aws_iam_role" "lambda_exec" {
-  name = "${var.function_name}-exec-role"
+  name = "${local.name}-exec-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -21,11 +21,15 @@ resource "aws_iam_role" "lambda_exec" {
       }
     ]
   })
+
+  tags = {
+    Environment = var.environment
+  }
 }
 
 # Scoped logging permissions — this function's own log group only, never "*".
 resource "aws_iam_role_policy" "lambda_logging" {
-  name = "${var.function_name}-logging-policy"
+  name = "${local.name}-logging-policy"
   role = aws_iam_role.lambda_exec.id
 
   policy = jsonencode({
@@ -47,7 +51,7 @@ resource "aws_iam_role_policy" "lambda_logging" {
 # for these two specific actions — there is no ARN to scope to; this is a
 # documented AWS platform constraint, not an over-broad grant.
 resource "aws_iam_role_policy" "lambda_xray" {
-  name = "${var.function_name}-xray-policy"
+  name = "${local.name}-xray-policy"
   role = aws_iam_role.lambda_exec.id
 
   policy = jsonencode({
@@ -71,7 +75,7 @@ resource "aws_iam_role_policy" "lambda_xray" {
 # justification as the CKV_AWS_158 skip below.
 #trivy:ignore:AVD-AWS-0017
 resource "aws_cloudwatch_log_group" "lambda_logs" {
-  name              = "/aws/lambda/${var.function_name}"
+  name              = "/aws/lambda/${local.name}"
   retention_in_days = var.log_retention_days
 
   # checkov:skip=CKV_AWS_158: Customer-managed KMS key intentionally omitted
@@ -81,10 +85,14 @@ resource "aws_cloudwatch_log_group" "lambda_logs" {
   # project's own design goal (see PORTFOLIO.md / project instructions) is
   # short log retention to keep a lab environment cheap and clean. Not a
   # production posture; a real production Lambda would use a longer window.
+
+  tags = {
+    Environment = var.environment
+  }
 }
 
 resource "aws_lambda_function" "app" {
-  function_name = var.function_name
+  function_name = local.name
   role          = aws_iam_role.lambda_exec.arn
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.13"
@@ -102,6 +110,10 @@ resource "aws_lambda_function" "app" {
 
   tracing_config {
     mode = "Active"
+  }
+
+  tags = {
+    Environment = var.environment
   }
 
   # checkov:skip=CKV_AWS_117: No VPC by design. Placing this Lambda in a VPC

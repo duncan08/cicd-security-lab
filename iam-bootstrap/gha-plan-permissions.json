@@ -2,6 +2,7 @@
   "Version": "2012-10-17",
   "Statement": [
     {
+      "Sid": "ReadOnlyDescribeExisting",
       "Effect": "Allow",
       "Action": [
         "iam:GetRole",
@@ -13,6 +14,28 @@
         "logs:DescribeLogGroups"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "ReadTerraformState",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::<TF_STATE_BUCKET>/dev/terraform.tfstate"
+    },
+    {
+      "Sid": "ListTerraformStateBucket",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::<TF_STATE_BUCKET>"
+    },
+    {
+      "Sid": "TerraformStateLock",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": "arn:aws:dynamodb:us-east-1:*:table/cicd-security-lab-tflock"
     }
   ]
 }
