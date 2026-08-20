@@ -11,7 +11,14 @@
         "iam:ListAttachedRolePolicies",
         "lambda:GetFunction",
         "lambda:GetFunctionConfiguration",
-        "logs:DescribeLogGroups"
+        "logs:DescribeLogGroups",
+        "logs:ListTagsForResource",
+        "lambda:ListTags",
+        "lambda:ListVersionsByFunction",
+        "lambda:GetFunctionCodeSigningConfig",
+        "lambda:GetFunctionConcurrency",
+        "lambda:GetRuntimeManagementConfig",
+        "lambda:GetPolicy"
       ],
       "Resource": "*"
     },
