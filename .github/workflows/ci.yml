@@ -100,3 +100,88 @@ jobs:
           name: sbom
           path: sbom.cdx.json
           retention-days: 14
+
+  terraform-fmt:
+    name: Terraform Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Terraform fmt check
+        run: terraform -chdir=terraform fmt -check -recursive
+
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Terraform init (no backend, no AWS credentials needed)
+        run: terraform -chdir=terraform init -backend=false
+
+      - name: Terraform validate
+        run: terraform -chdir=terraform validate
+
+  iac-scan:
+    name: IaC Scan (Checkov + Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Checkov
+        run: pip install checkov
+
+      - name: Run Checkov on deployable Terraform only
+        run: checkov --directory terraform/ --compact
+
+      - name: Run Trivy config scan on deployable Terraform only
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: 'terraform/'
+          exit-code: '1'
+
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Terraform init
+        run: terraform -chdir=terraform init -backend=false
+
+      - name: Terraform plan
+        run: terraform -chdir=terraform plan -no-color
