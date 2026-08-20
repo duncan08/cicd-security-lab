@@ -249,3 +249,49 @@ jobs:
         run: |
           echo "lambda_function_name=$(terraform -chdir=terraform output -raw lambda_function_name)" >> "$GITHUB_OUTPUT"
           echo "lambda_function_arn=$(terraform -chdir=terraform output -raw lambda_function_arn)" >> "$GITHUB_OUTPUT"
+
+  smoke-test-dev:
+    name: Smoke Test DEV
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    # No explicit `if` needed: GitHub Actions automatically skips a job
+    # whose `needs` didn't succeed (deploy-dev itself already only runs on
+    # a real push to main — see its own comment above), so this job runs
+    # only when a real dev deploy just happened and succeeded.
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_DEV_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Invoke dev Lambda and verify the response
+        run: |
+          set -euo pipefail
+
+          aws lambda invoke \
+            --function-name "${{ needs.deploy-dev.outputs.lambda_function_name }}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"name": "smoke-test"}' \
+            response.json
+
+          echo "--- Raw Lambda response ---"
+          cat response.json
+
+          STATUS_CODE=$(jq -r '.statusCode' response.json)
+          MESSAGE=$(jq -r '.body | fromjson | .message' response.json)
+
+          if [ "$STATUS_CODE" != "200" ]; then
+            echo "::error::Expected statusCode 200, got $STATUS_CODE"
+            exit 1
+          fi
+
+          if [ "$MESSAGE" != "Hello, smoke-test!" ]; then
+            echo "::error::Expected message 'Hello, smoke-test!', got '$MESSAGE'"
+            exit 1
+          fi
+
+          echo "Smoke test passed: dev Lambda returned the expected response."
