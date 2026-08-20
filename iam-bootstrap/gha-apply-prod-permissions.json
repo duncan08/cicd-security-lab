@@ -15,7 +15,11 @@
         "lambda:UntagResource",
         "lambda:ListTags",
         "lambda:PutFunctionConcurrency",
-        "lambda:GetPolicy"
+        "lambda:GetPolicy",
+        "lambda:ListVersionsByFunction",
+        "lambda:GetFunctionCodeSigningConfig",
+        "lambda:GetFunctionConcurrency",
+        "lambda:GetRuntimeManagementConfig"
       ],
       "Resource": "arn:aws:lambda:us-east-1:*:function:cicd-security-lab-fn-prod"
     },
@@ -48,13 +52,21 @@
       "Action": [
         "logs:CreateLogGroup",
         "logs:DeleteLogGroup",
-        "logs:DescribeLogGroups",
         "logs:PutRetentionPolicy",
         "logs:ListTagsForResource",
         "logs:TagResource",
         "logs:UntagResource"
       ],
-      "Resource": "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/cicd-security-lab-fn-prod:*"
+      "Resource": [
+        "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/cicd-security-lab-fn-prod",
+        "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/cicd-security-lab-fn-prod:*"
+      ]
+    },
+    {
+      "Sid": "LogGroupDescribeProd",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*"
     },
     {
       "Sid": "TerraformStateReadWriteProd",
