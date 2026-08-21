@@ -5,6 +5,7 @@ on:
     branches: [ main, "feature/**" ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -295,3 +296,108 @@ jobs:
           fi
 
           echo "Smoke test passed: dev Lambda returned the expected response."
+
+  deploy-prod:
+    name: Deploy to PROD
+    runs-on: ubuntu-latest
+    needs:
+      - test
+      - secret-scan
+      - sast
+      - dependency-scan
+      - sbom
+      - terraform-fmt
+      - terraform-validate
+      - iac-scan
+      - terraform-plan
+    # Only runs when manually dispatched against main — never on push or
+    # pull_request. Unlike dev (auto-deploys on merge), prod requires a
+    # human to explicitly start the attempt, on top of the required-
+    # reviewer approval gate below (environment: production) that must
+    # also clear before these steps execute. Defense in depth: the
+    # apply-prod IAM role's trust policy independently refuses credentials
+    # to anything but a job declaring environment:production (see
+    # iam-bootstrap/apply-prod-permissions.json and its trust policy).
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      lambda_function_name: ${{ steps.tf_outputs.outputs.lambda_function_name }}
+      lambda_function_arn: ${{ steps.tf_outputs.outputs.lambda_function_arn }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_PROD_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Terraform init
+        run: |
+          terraform -chdir=terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=prod/terraform.tfstate"
+
+      - name: Terraform apply
+        run: terraform -chdir=terraform apply -auto-approve -var="environment=prod"
+
+      - name: Capture Terraform outputs for the smoke test
+        id: tf_outputs
+        run: |
+          echo "lambda_function_name=$(terraform -chdir=terraform output -raw lambda_function_name)" >> "$GITHUB_OUTPUT"
+          echo "lambda_function_arn=$(terraform -chdir=terraform output -raw lambda_function_arn)" >> "$GITHUB_OUTPUT"
+
+  smoke-test-prod:
+    name: Smoke Test PROD
+    runs-on: ubuntu-latest
+    needs: deploy-prod
+    # environment: production is required here too (not just on deploy-prod)
+    # because AWS_APPLY_PROD_ROLE_ARN is an environment-scoped secret — a
+    # job that doesn't declare this environment simply can't see it.
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_PROD_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Invoke prod Lambda and verify the response
+        run: |
+          set -euo pipefail
+
+          aws lambda invoke \
+            --function-name "${{ needs.deploy-prod.outputs.lambda_function_name }}" \
+            --cli-binary-format raw-in-base64-out \
+            --payload '{"name": "smoke-test"}' \
+            response.json
+
+          echo "--- Raw Lambda response ---"
+          cat response.json
+
+          STATUS_CODE=$(jq -r '.statusCode' response.json)
+          MESSAGE=$(jq -r '.body | fromjson | .message' response.json)
+
+          if [ "$STATUS_CODE" != "200" ]; then
+            echo "::error::Expected statusCode 200, got $STATUS_CODE"
+            exit 1
+          fi
+
+          if [ "$MESSAGE" != "Hello, smoke-test!" ]; then
+            echo "::error::Expected message 'Hello, smoke-test!', got '$MESSAGE'"
+            exit 1
+          fi
+
+          echo "Smoke test passed: prod Lambda returned the expected response."
