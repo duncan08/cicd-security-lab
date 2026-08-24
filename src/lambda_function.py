@@ -12,6 +12,7 @@ def build_greeting(name: str) -> str:
     """Pure, easily-testable business logic separated from the handler."""
     if not name:
         name = "world"
+    name = "".join(ch for ch in name if ch.isalnum())  # sanitize input
     return f"Hello, {name}!"
 
 
